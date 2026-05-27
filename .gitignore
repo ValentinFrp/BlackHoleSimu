@@ -1,0 +1,9 @@
+# Artefacts de build
+/target
+/web/pkg
+
+# Assets lourds fournis localement (HDRI de la Voie lactée, etc.)
+/assets/*.hdr
+/assets/*.exr
+.claude
+CLAUDE.md

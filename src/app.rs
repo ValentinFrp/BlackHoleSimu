@@ -1,12 +1,15 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::Window;
 
-use crate::renderer::WgpuState;
+use crate::camera::{CameraController, OrbitCamera};
+use crate::renderer::Renderer;
+use crate::scene::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn(f: impl Future<Output = ()> + 'static) {
@@ -18,19 +21,23 @@ fn spawn(f: impl Future<Output = ()> + 'static) {
 }
 
 enum AppAction {
-    Ready(WgpuState),
+    RendererReady(Renderer),
 }
 
-enum AppState {
+enum Stage {
     Uninitialized,
     Loading,
-    Running(WgpuState),
+    Running(Renderer),
 }
 
 struct App {
     proxy: EventLoopProxy<AppAction>,
     window: Option<Arc<Window>>,
-    state: AppState,
+    stage: Stage,
+    camera: OrbitCamera,
+    controller: CameraController,
+    scene: Scene,
+    start: Instant,
 }
 
 impl App {
@@ -38,17 +45,27 @@ impl App {
         Self {
             proxy: event_loop.create_proxy(),
             window: None,
-            state: AppState::Uninitialized,
+            stage: Stage::Uninitialized,
+            camera: OrbitCamera::new(20.0, 50.0),
+            controller: CameraController::default(),
+            scene: Scene::default(),
+            start: Instant::now(),
+        }
+    }
+
+    fn redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 }
 
 impl ApplicationHandler<AppAction> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if !matches!(self.state, AppState::Uninitialized) {
+        if !matches!(self.stage, Stage::Uninitialized) {
             return;
         }
-        self.state = AppState::Loading;
+        self.stage = Stage::Loading;
 
         #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
         let mut attributes = Window::default_attributes().with_title("BlackHoleSimu");
@@ -74,20 +91,17 @@ impl ApplicationHandler<AppAction> for App {
 
         let display_handle = event_loop.owned_display_handle();
         let proxy = self.proxy.clone();
-
         spawn(async move {
-            let state = WgpuState::new(window, display_handle).await;
-            let _ = proxy.send_event(AppAction::Ready(state));
+            let renderer = Renderer::new(window, display_handle).await;
+            let _ = proxy.send_event(AppAction::RendererReady(renderer));
         });
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, action: AppAction) {
         match action {
-            AppAction::Ready(state) => {
-                self.state = AppState::Running(state);
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+            AppAction::RendererReady(renderer) => {
+                self.stage = Stage::Running(renderer);
+                self.redraw();
             }
         }
     }
@@ -98,24 +112,30 @@ impl ApplicationHandler<AppAction> for App {
         _id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let AppState::Running(state) = &mut self.state else {
-            return;
-        };
-
         match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
-                state.resize(size.width, size.height);
-                if let Some(window) = &self.window {
-                    window.request_redraw();
+                if let Stage::Running(renderer) = &mut self.stage {
+                    renderer.resize(size.width, size.height);
                 }
+                self.redraw();
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.controller.on_mouse_button(button, state);
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.controller.on_cursor_moved(position, &mut self.camera);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.controller.on_scroll(delta, &mut self.camera);
             }
             WindowEvent::RedrawRequested => {
-                state.render();
-                if let Some(window) = &self.window {
-                    window.request_redraw();
+                let time = self.start.elapsed().as_secs_f32();
+                if let Stage::Running(renderer) = &mut self.stage {
+                    renderer.render(&self.camera, &self.scene, time);
                 }
+                self.redraw();
             }
-            WindowEvent::CloseRequested => event_loop.exit(),
             _ => {}
         }
     }

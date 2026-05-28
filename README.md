@@ -9,9 +9,10 @@ du ray casting par pixel à travers l'espace-temps courbé.
 Une seule base de code, deux cibles : **natif** (`cargo run`, pour itérer vite)
 et **navigateur** via **WebAssembly** (`wasm-pack`).
 
-> **État : Phase 1 terminée.** Le squelette compile et tourne sur les deux
-> cibles : fenêtre wgpu + triangle plein écran affichant une couleur unie
-> animée. La physique arrive aux phases suivantes (voir la feuille de route).
+> **État : Phase 2 (trou noir naïf).** Caméra orbitale, sphère noire (horizon),
+> disque d'accrétion plat coloré et fond étoilé HDRI. Les rayons sont encore
+> **droits** : pas de lentille gravitationnelle (elle arrive en Phase 3 avec
+> l'intégration des géodésiques).
 
 ## Effets visés (feuille de route physique)
 
@@ -60,28 +61,69 @@ cd web && python3 -m http.server 8080
 
 | Action | Entrée |
 | --- | --- |
-| (Phase 1) aucun | — |
-| Orbite caméra | clic-glisser *(à partir de la phase 2)* |
-| Zoom | molette *(à partir de la phase 2)* |
+| Orbiter autour du trou noir | clic gauche + glisser |
+| Zoom (rapprocher / éloigner) | molette |
+
+## Rendu (Phase 2)
+
+Un triangle plein écran déclenche le *fragment shader* `blackhole.wgsl`, qui
+lance pour chaque pixel un rayon depuis la caméra. Trois issues :
+
+1. le rayon coupe l'horizon (sphère de rayon `r_s`) → **noir** ;
+2. il coupe le plan équatorial dans l'anneau `[r_in, r_out]` → **disque** coloré
+   (dégradé radial provisoire ; le vrai corps noir relativiste vient en Phase 5) ;
+3. sinon il part à l'infini → on échantillonne le **HDRI** (projection
+   équirectangulaire) dans la direction du rayon.
+
+À ce stade les rayons sont rectilignes ; la courbure de l'espace-temps (lentille,
+anneau de photons, beaming, redshift) est ajoutée aux phases suivantes.
 
 ## Architecture
 
 ```
 src/
-├── main.rs            entrée native -> app::run()
-├── lib.rs             entrée WASM (#[wasm_bindgen(start)])
-├── app.rs            boucle d'évènements winit + cycle de vie
+├── main.rs                 entrée native -> app::run()
+├── lib.rs                  entrée WASM (#[wasm_bindgen(start)])
+├── app.rs                  boucle winit, dispatch des entrées, cycle de vie
+├── camera.rs               OrbitCamera (coords sphériques) + CameraController
+├── scene.rs                paramètres physiques (trou noir, disque)
 └── renderer/
-    ├── mod.rs
-    └── pipeline.rs   setup wgpu (device, surface, pipeline, uniforms) + rendu
+    ├── mod.rs              façade Renderer (orchestration d'une frame)
+    ├── context.rs          GpuContext : device/queue/surface, resize, frame
+    ├── uniforms.rs         bloc uniforme (std140) caméra + scène
+    ├── hdri.rs             chargement HDRI (fs natif / fetch WASM) + décodage
+    ├── texture.rs          texture + sampler du fond HDRI
+    └── blackhole_pass.rs   pipeline + bind groups + enregistrement de la passe
 shaders/
-└── fullscreen.wgsl   triangle plein écran (deviendra le ray caster)
-web/                  index.html + style.css + main.js (bootstrap WASM)
+├── common.wgsl             uniforms + helpers math (rayons, intersections, sky)
+└── blackhole.wgsl          entry points VS/FS (concaténé après common.wgsl)
+web/                        index.html + style.css + main.js (bootstrap WASM)
+assets/milkyway.hdr         fond Voie lactée (non versionné, voir ci-dessous)
 ```
 
 Phases à venir : `physics/` (métrique Schwarzschild, RK4, disque Novikov-Thorne),
-`renderer/precompute.rs` (table de déflexion à la Bruneton), `renderer/textures.rs`
-(HDRI, LUT corps noir), `camera.rs` (caméra orbitale).
+`renderer/precompute.rs` (table de déflexion à la Bruneton), LUT corps noir.
+
+## Assets
+
+Le fond étoilé attendu en `assets/milkyway.png` est une carte du ciel
+équirectangulaire (4096×2048). Le chargeur accepte aussi le Radiance `.hdr`
+(adapter `SKY_SOURCE` dans `renderer/mod.rs`). Le fichier n'est pas versionné ;
+s'il est absent, le rendu bascule sur un fond sombre uni.
+
+Le fond fourni par défaut est le **Milky Way panorama** de l'ESO :
+
+> Crédit : **ESO/S. Brunier** — [eso0932a](https://www.eso.org/public/images/eso0932a/),
+> sous licence [Creative Commons CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+> Réduit en 4096×2048 et converti en PNG pour ce projet.
+
+En natif, le chemin est résolu en absolu (racine du crate) : `cargo run`
+fonctionne quel que soit le dossier courant. Pour le web, le serveur sert `web/`,
+donc un symlink `web/assets -> ../assets` expose l'asset sans le dupliquer :
+
+```bash
+ln -s ../assets web/assets   # à créer une fois
+```
 
 ## Tests
 
@@ -89,9 +131,9 @@ Phases à venir : `physics/` (métrique Schwarzschild, RK4, disque Novikov-Thorn
 cargo test
 ```
 
-Les tests unitaires couvriront la physique : métrique, intégrateur RK4 (vérifié
-sur des orbites circulaires connues), transformation Doppler. *(à partir de la
-phase 3.)*
+Actuellement : validation du shader WGSL via naga (parse + validation) sans GPU.
+À partir de la Phase 3 s'ajouteront les tests de physique : métrique, intégrateur
+RK4 (vérifié sur des orbites circulaires connues), transformation Doppler.
 
 ## Références scientifiques
 

@@ -1,4 +1,4 @@
-use crate::physics::DeflectionLut;
+use crate::physics::{BlackbodyLut, DeflectionLut};
 use crate::renderer::lut_texture::LutTextures;
 use crate::renderer::sky::SkyImage;
 use crate::renderer::texture::SkyTexture;
@@ -21,6 +21,7 @@ impl BlackHolePass {
         target_format: wgpu::TextureFormat,
         sky: &SkyImage,
         lut: &DeflectionLut,
+        blackbody: &BlackbodyLut,
     ) -> Self {
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("uniforms"),
@@ -56,7 +57,7 @@ impl BlackHolePass {
             ],
         });
 
-        let lut_textures = LutTextures::new(device, queue, lut);
+        let lut_textures = LutTextures::new(device, queue, lut, blackbody);
         let lut_layout = lut_bind_group_layout(device);
         let lut_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lut bind group"),
@@ -69,6 +70,10 @@ impl BlackHolePass {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&lut_textures.phi_max_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&lut_textures.blackbody_view),
                 },
             ],
         });
@@ -184,6 +189,12 @@ fn lut_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: unfilterable,
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: unfilterable,
                 count: None,

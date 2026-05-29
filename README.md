@@ -9,13 +9,14 @@ du ray casting par pixel à travers l'espace-temps courbé.
 Une seule base de code, deux cibles : **natif** (`cargo run`, pour itérer vite)
 et **navigateur** via **WebAssembly** (`wasm-pack`).
 
-> **État : Phase 4 (LUT de déflexion).** La géodésique n'est plus intégrée par
-> pixel : une table de déflexion précalculée sur CPU (équation de Binet, indexée
-> par paramètre d'impact) est uploadée en texture, et le shader l'interroge —
-> approche **Bruneton 2020**. Même rendu que la Phase 3 (lentille, anneau de
-> photons, images multiples du disque) pour un coût bien moindre. Détails et
-> formules : [`docs/deflection-lut.md`](docs/deflection-lut.md). Reste à venir :
-> effets relativistes fins (Doppler, redshift, corps noir) et polish.
+> **État : Phase 5 (physique relativiste du disque).** La déflexion passe par une
+> table précalculée ([Bruneton 2020](docs/deflection-lut.md)), et le disque est
+> désormais physique : profil de température **Novikov-Thorne**, **Doppler** +
+> **redshift gravitationnel** condensés dans un facteur `g` (couleur de corps
+> noir à `g·T`, brillance `∝ g⁴`), couleur via une **LUT corps noir**
+> (Planck × CIE → sRGB). Un côté du disque vient vers l'observateur : brillant et
+> bleui ; l'autre, sombre et rougi. Détails :
+> [`docs/disk-physics.md`](docs/disk-physics.md). Reste : le polish (Phase 6).
 
 ## Effets visés (feuille de route physique)
 
@@ -82,8 +83,9 @@ WebGL2). Le shader en déduit, le long du rayon courbé :
 
 1. `b < b_crit = 3√3/2·r_s` et rayon rentrant → **noir** (horizon) ;
 2. croisement(s) du plan équatorial dans l'anneau `[r_in, r_out]` → **disque**
-   (dégradé radial provisoire ; corps noir relativiste en Phase 5). Les
-   croisements multiples donnent recto/verso et anneaux d'ordre supérieur ;
+   relativiste (profil Novikov-Thorne, Doppler + redshift via `g`, couleur de
+   corps noir, brillance `∝ g⁴` ; cf. [`docs/disk-physics.md`](docs/disk-physics.md)).
+   Les croisements multiples donnent recto/verso et anneaux d'ordre supérieur ;
 3. échappement → échantillonnage du fond stellaire dans la **direction finale
    lensée**.
 
@@ -103,7 +105,8 @@ src/
 ├── physics/
 │   ├── mod.rs             ré-exports
 │   ├── geodesic.rs        intégration de l'équation de Binet (+ tests)
-│   └── lut.rs             construction de la table de déflexion (+ tests)
+│   ├── lut.rs             construction de la table de déflexion (+ tests)
+│   └── blackbody.rs       LUT corps noir Planck × CIE → sRGB (+ tests)
 └── renderer/
     ├── mod.rs             façade Renderer (orchestration d'une frame)
     ├── context.rs         GpuContext : device/queue/surface, resize, frame
@@ -115,13 +118,13 @@ src/
 shaders/
 ├── common.wgsl             uniforms + lecture de table + trace_ray + helpers
 └── blackhole.wgsl          entry points VS/FS (concaténé après common.wgsl)
-docs/deflection-lut.md      dérivation physique + layout de la table
+docs/deflection-lut.md      dérivation de la table de déflexion (Phase 4)
+docs/disk-physics.md        Doppler/redshift/Novikov-Thorne/corps noir (Phase 5)
 web/                        index.html + style.css + main.js (bootstrap WASM)
 assets/milkyway.png         fond Voie lactée (non versionné, voir ci-dessous)
 ```
 
-Phases à venir : disque Novikov-Thorne (profil T(r)), Doppler/redshift, LUT
-corps noir, polish.
+Phase à venir : polish (super-sampling sur l'anneau, bloom HDR, UI sliders).
 
 ## Assets
 

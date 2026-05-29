@@ -11,7 +11,7 @@ use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
 use crate::camera::OrbitCamera;
-use crate::physics::DeflectionLut;
+use crate::physics::{BlackbodyLut, DeflectionLut};
 use crate::scene::Scene;
 use blackhole_pass::BlackHolePass;
 use context::GpuContext;
@@ -35,12 +35,14 @@ impl Renderer {
         let ctx = GpuContext::new(window, display_handle).await;
         let sky = load_sky().await;
         let lut = DeflectionLut::build();
+        let blackbody = BlackbodyLut::build();
         let pass = BlackHolePass::new(
             ctx.device(),
             ctx.queue(),
             ctx.surface_format(),
             &sky,
             &lut,
+            &blackbody,
         );
         Self {
             ctx,

@@ -20,7 +20,7 @@ pub struct Uniforms {
     disk_inner: f32,
     disk_outer: f32,
     exposure: f32,
-    _pad4: f32,
+    disk_temperature: f32,
 }
 
 impl Uniforms {
@@ -46,7 +46,7 @@ impl Uniforms {
             disk_inner: scene.disk.inner_radius,
             disk_outer: scene.disk.outer_radius,
             exposure,
-            _pad4: 0.0,
+            disk_temperature: scene.disk.peak_temperature,
         }
     }
 }

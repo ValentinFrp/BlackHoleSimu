@@ -7,6 +7,7 @@ pub struct BlackHole {
 pub struct AccretionDisk {
     pub inner_radius: f32,
     pub outer_radius: f32,
+    pub peak_temperature: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -25,6 +26,7 @@ impl Default for Scene {
             disk: AccretionDisk {
                 inner_radius: 3.0 * r_s,
                 outer_radius: 11.0 * r_s,
+                peak_temperature: 6500.0,
             },
         }
     }

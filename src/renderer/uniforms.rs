@@ -19,18 +19,16 @@ pub struct Uniforms {
     schwarzschild_radius: f32,
     disk_inner: f32,
     disk_outer: f32,
-    exposure: f32,
     disk_temperature: f32,
+    disk_intensity: f32,
+    disk_spin: f32,
+    _pad4: f32,
+    _pad5: f32,
+    _pad6: f32,
 }
 
 impl Uniforms {
-    pub fn new(
-        camera: &CameraBasis,
-        scene: &Scene,
-        resolution: [f32; 2],
-        time: f32,
-        exposure: f32,
-    ) -> Self {
+    pub fn new(camera: &CameraBasis, scene: &Scene, resolution: [f32; 2], time: f32) -> Self {
         Self {
             cam_position: camera.position.to_array(),
             _pad0: 0.0,
@@ -45,8 +43,12 @@ impl Uniforms {
             schwarzschild_radius: scene.black_hole.schwarzschild_radius,
             disk_inner: scene.disk.inner_radius,
             disk_outer: scene.disk.outer_radius,
-            exposure,
             disk_temperature: scene.disk.peak_temperature,
+            disk_intensity: scene.disk.intensity,
+            disk_spin: scene.disk.spin,
+            _pad4: 0.0,
+            _pad5: 0.0,
+            _pad6: 0.0,
         }
     }
 }

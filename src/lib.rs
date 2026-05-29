@@ -3,6 +3,7 @@ pub mod camera;
 pub mod physics;
 pub mod renderer;
 pub mod scene;
+pub mod ui;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

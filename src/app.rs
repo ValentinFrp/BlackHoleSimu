@@ -10,6 +10,7 @@ use winit::window::Window;
 use crate::camera::{CameraController, OrbitCamera};
 use crate::renderer::Renderer;
 use crate::scene::Scene;
+use crate::ui;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn(f: impl Future<Output = ()> + 'static) {
@@ -38,6 +39,9 @@ struct App {
     controller: CameraController,
     scene: Scene,
     start: Instant,
+    egui_ctx: egui::Context,
+    egui_state: Option<egui_winit::State>,
+    supersample_enabled: bool,
 }
 
 impl App {
@@ -50,6 +54,9 @@ impl App {
             controller: CameraController::default(),
             scene: Scene::default(),
             start: Instant::now(),
+            egui_ctx: egui::Context::default(),
+            egui_state: None,
+            supersample_enabled: true,
         }
     }
 
@@ -89,6 +96,15 @@ impl ApplicationHandler<AppAction> for App {
         );
         self.window = Some(window.clone());
 
+        self.egui_state = Some(egui_winit::State::new(
+            self.egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*window,
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        ));
+
         let display_handle = event_loop.owned_display_handle();
         let proxy = self.proxy.clone();
         spawn(async move {
@@ -112,6 +128,11 @@ impl ApplicationHandler<AppAction> for App {
         _id: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        if let (Some(window), Some(state)) = (self.window.as_ref(), self.egui_state.as_mut()) {
+            let _ = state.on_window_event(window, &event);
+        }
+        let ui_captures_pointer = self.egui_ctx.egui_wants_pointer_input();
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -121,20 +142,56 @@ impl ApplicationHandler<AppAction> for App {
                 self.redraw();
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.controller.on_mouse_button(button, state);
+                if !ui_captures_pointer {
+                    self.controller.on_mouse_button(button, state);
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.controller.on_cursor_moved(position, &mut self.camera);
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.controller.on_scroll(delta, &mut self.camera);
+                if !ui_captures_pointer {
+                    self.controller.on_scroll(delta, &mut self.camera);
+                }
             }
             WindowEvent::RedrawRequested => {
                 let time = self.start.elapsed().as_secs_f32();
-                if let Stage::Running(renderer) = &mut self.stage {
-                    renderer.render(&self.camera, &self.scene, time);
+                let Self {
+                    stage,
+                    scene,
+                    camera,
+                    egui_ctx,
+                    egui_state,
+                    window,
+                    supersample_enabled,
+                    ..
+                } = self;
+                if let (Stage::Running(renderer), Some(state), Some(window)) =
+                    (stage, egui_state, window)
+                {
+                    let raw_input = state.take_egui_input(window);
+                    let output = egui_ctx.run_ui(raw_input, |egui_ui| {
+                        ui::panel(
+                            egui_ui.ctx(),
+                            scene,
+                            renderer.settings_mut(),
+                            supersample_enabled,
+                        );
+                    });
+                    state.handle_platform_output(window, output.platform_output);
+                    let pixels_per_point = egui_ctx.pixels_per_point();
+                    let jobs = egui_ctx.tessellate(output.shapes, pixels_per_point);
+                    renderer.set_supersample(if *supersample_enabled { 2 } else { 1 });
+                    renderer.render(
+                        camera,
+                        scene,
+                        time,
+                        jobs,
+                        output.textures_delta,
+                        pixels_per_point,
+                    );
+                    window.request_redraw();
                 }
-                self.redraw();
             }
             _ => {}
         }

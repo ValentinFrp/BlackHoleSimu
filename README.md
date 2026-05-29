@@ -9,14 +9,12 @@ du ray casting par pixel à travers l'espace-temps courbé.
 Une seule base de code, deux cibles : **natif** (`cargo run`, pour itérer vite)
 et **navigateur** via **WebAssembly** (`wasm-pack`).
 
-> **État : Phase 5 (physique relativiste du disque).** La déflexion passe par une
-> table précalculée ([Bruneton 2020](docs/deflection-lut.md)), et le disque est
-> désormais physique : profil de température **Novikov-Thorne**, **Doppler** +
-> **redshift gravitationnel** condensés dans un facteur `g` (couleur de corps
-> noir à `g·T`, brillance `∝ g⁴`), couleur via une **LUT corps noir**
-> (Planck × CIE → sRGB). Un côté du disque vient vers l'observateur : brillant et
-> bleui ; l'autre, sombre et rougi. Détails :
-> [`docs/disk-physics.md`](docs/disk-physics.md). Reste : le polish (Phase 6).
+> **État : terminé (Phase 6 — polish).** Lentille gravitationnelle via table de
+> déflexion ([Bruneton 2020](docs/deflection-lut.md)) ; disque relativiste
+> physique (Novikov-Thorne + Doppler/redshift + corps noir,
+> [détails](docs/disk-physics.md)) ; et post-traitement HDR : **super-sampling
+> (SSAA 2×)** anti-aliasing, **bloom**, tonemap **ACES**, et un panneau de
+> **sliders egui** (température, intensité, rayons, exposition, bloom, SSAA…).
 
 ## Effets visés (feuille de route physique)
 
@@ -67,6 +65,7 @@ cd web && python3 -m http.server 8080
 | --- | --- |
 | Orbiter autour du trou noir | clic gauche + glisser |
 | Zoom (rapprocher / éloigner) | molette |
+| Régler le disque / le rendu | panneau de sliders (en haut à gauche) |
 
 ## Rendu (Phase 4)
 
@@ -107,24 +106,31 @@ src/
 │   ├── geodesic.rs        intégration de l'équation de Binet (+ tests)
 │   ├── lut.rs             construction de la table de déflexion (+ tests)
 │   └── blackbody.rs       LUT corps noir Planck × CIE → sRGB (+ tests)
+├── ui.rs                  panneau de réglages egui (sliders)
 └── renderer/
-    ├── mod.rs             façade Renderer (orchestration d'une frame)
+    ├── mod.rs             façade Renderer (orchestration d'une frame + egui)
     ├── context.rs         GpuContext : device/queue/surface, resize, frame
     ├── uniforms.rs        bloc uniforme (std140) caméra + scène
     ├── sky.rs             chargement du fond (fs natif / fetch WASM) + décodage
     ├── texture.rs         texture + sampler du fond stellaire
     ├── lut_texture.rs     upload de la table de déflexion en textures R32Float
-    └── blackhole_pass.rs  pipeline + bind groups + enregistrement de la passe
+    ├── offscreen.rs       cible HDR (résolution SSAA) + textures de bloom
+    ├── post_pass.rs       bloom + composite (exposure + ACES) vers le swapchain
+    └── blackhole_pass.rs  pipeline + bind groups + passe principale (→ HDR)
 shaders/
 ├── common.wgsl             uniforms + lecture de table + trace_ray + helpers
-└── blackhole.wgsl          entry points VS/FS (concaténé après common.wgsl)
+├── blackhole.wgsl          entry points VS/FS (sortie HDR linéaire)
+├── post.wgsl               bright-pass + flou gaussien séparable (bloom)
+└── composite.wgsl          scène + bloom → exposure → ACES → swapchain
 docs/deflection-lut.md      dérivation de la table de déflexion (Phase 4)
 docs/disk-physics.md        Doppler/redshift/Novikov-Thorne/corps noir (Phase 5)
 web/                        index.html + style.css + main.js (bootstrap WASM)
 assets/milkyway.png         fond Voie lactée (non versionné, voir ci-dessous)
 ```
 
-Phase à venir : polish (super-sampling sur l'anneau, bloom HDR, UI sliders).
+Post-traitement (Phase 6) : la passe principale écrit une cible HDR linéaire en
+résolution SSAA, puis `post_pass` applique bloom + tonemap ACES vers le
+swapchain, et egui dessine les sliders par-dessus.
 
 ## Assets
 

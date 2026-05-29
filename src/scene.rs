@@ -8,6 +8,8 @@ pub struct AccretionDisk {
     pub inner_radius: f32,
     pub outer_radius: f32,
     pub peak_temperature: f32,
+    pub intensity: f32,
+    pub spin: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -27,6 +29,8 @@ impl Default for Scene {
                 inner_radius: 3.0 * r_s,
                 outer_radius: 11.0 * r_s,
                 peak_temperature: 6500.0,
+                intensity: 0.4,
+                spin: 1.0,
             },
         }
     }

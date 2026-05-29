@@ -28,5 +28,5 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         color = sample_sky(traced.direction);
     }
 
-    return vec4<f32>(aces_tonemap(color * u.exposure), 1.0);
+    return vec4<f32>(color, 1.0);
 }

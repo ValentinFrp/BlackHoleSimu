@@ -17,8 +17,6 @@ const BB_T_MIN: f32 = 1000.0;
 const BB_T_MAX: f32 = 40000.0;
 
 const NT_PEAK: f32 = 0.4877986;
-const DISK_SPIN: f32 = 1.0;
-const DISK_INTENSITY: f32 = 0.4;
 
 struct Uniforms {
     cam_position: vec3<f32>,
@@ -30,8 +28,9 @@ struct Uniforms {
     schwarzschild_radius: f32,
     disk_inner: f32,
     disk_outer: f32,
-    exposure: f32,
     disk_temperature: f32,
+    disk_intensity: f32,
+    disk_spin: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -192,15 +191,6 @@ fn sample_sky(dir: vec3<f32>) -> vec3<f32> {
     return textureSampleLevel(sky_texture, sky_sampler, vec2<f32>(longitude, latitude), 0.0).rgb;
 }
 
-fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
 fn blackbody_color(temperature: f32) -> vec3<f32> {
     let t = clamp((temperature - BB_T_MIN) / (BB_T_MAX - BB_T_MIN), 0.0, 1.0) * (BB_N - 1.0);
     let i0 = i32(floor(t));
@@ -241,7 +231,7 @@ fn doppler_g(
     let photon_proper = (dr_dtheta / sqrt(lapse)) * radius_dir + radius * transverse_dir;
     let emit_dir = normalize(-photon_proper);
 
-    let azimuth = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), radius_dir)) * DISK_SPIN;
+    let azimuth = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), radius_dir)) * u.disk_spin;
     let beta = sqrt((rs * 0.5) / (radius - rs));
     let gamma = 1.0 / sqrt(1.0 - beta * beta);
     let g_doppler = 1.0 / (gamma * (1.0 - beta * dot(azimuth, emit_dir)));
@@ -265,6 +255,6 @@ fn disk_emission(
     let g = doppler_g(radius, theta, u_hit, b, branch_sign, travel_sign, radial, tangent);
     let temperature = disk_temperature(radius);
     let ratio = temperature / u.disk_temperature;
-    let intensity = pow(g, 4.0) * ratio * ratio * ratio * ratio * DISK_INTENSITY;
+    let intensity = pow(g, 4.0) * ratio * ratio * ratio * ratio * u.disk_intensity;
     return blackbody_color(g * temperature) * intensity;
 }

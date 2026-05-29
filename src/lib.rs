@@ -1,5 +1,6 @@
 pub mod app;
 pub mod camera;
+pub mod physics;
 pub mod renderer;
 pub mod scene;
 

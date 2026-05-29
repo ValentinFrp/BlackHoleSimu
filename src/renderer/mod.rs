@@ -1,5 +1,6 @@
 mod blackhole_pass;
 mod context;
+mod lut_texture;
 mod sky;
 mod texture;
 mod uniforms;
@@ -10,6 +11,7 @@ use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
 use crate::camera::OrbitCamera;
+use crate::physics::DeflectionLut;
 use crate::scene::Scene;
 use blackhole_pass::BlackHolePass;
 use context::GpuContext;
@@ -32,11 +34,13 @@ impl Renderer {
     pub async fn new(window: Arc<Window>, display_handle: OwnedDisplayHandle) -> Self {
         let ctx = GpuContext::new(window, display_handle).await;
         let sky = load_sky().await;
+        let lut = DeflectionLut::build();
         let pass = BlackHolePass::new(
             ctx.device(),
             ctx.queue(),
             ctx.surface_format(),
             &sky,
+            &lut,
         );
         Self {
             ctx,

@@ -17,18 +17,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let origin = u.cam_position;
     let dir = ray_direction(in.uv);
 
-    let t_horizon = intersect_sphere(origin, dir, u.schwarzschild_radius);
-    let t_disk = intersect_disk(origin, dir);
-
-    let disk_visible = t_disk > 0.0 && (t_horizon < 0.0 || t_disk < t_horizon);
+    let traced = trace_ray(origin, dir);
 
     var color: vec3<f32>;
-    if disk_visible {
-        color = disk_emission(origin + t_disk * dir);
-    } else if t_horizon > 0.0 {
+    if traced.kind == 1u {
+        color = traced.color;
+    } else if traced.kind == 2u {
         color = vec3<f32>(0.0);
     } else {
-        color = sample_sky(dir);
+        color = sample_sky(traced.direction);
     }
 
     return vec4<f32>(aces_tonemap(color * u.exposure), 1.0);

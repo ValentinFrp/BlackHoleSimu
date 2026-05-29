@@ -1,3 +1,5 @@
+use crate::physics::DeflectionLut;
+use crate::renderer::lut_texture::LutTextures;
 use crate::renderer::sky::SkyImage;
 use crate::renderer::texture::SkyTexture;
 use crate::renderer::uniforms::Uniforms;
@@ -7,7 +9,9 @@ pub struct BlackHolePass {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     sky_bind_group: wgpu::BindGroup,
+    lut_bind_group: wgpu::BindGroup,
     _sky: SkyTexture,
+    _lut: LutTextures,
 }
 
 impl BlackHolePass {
@@ -16,6 +20,7 @@ impl BlackHolePass {
         queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
         sky: &SkyImage,
+        lut: &DeflectionLut,
     ) -> Self {
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("uniforms"),
@@ -51,14 +56,37 @@ impl BlackHolePass {
             ],
         });
 
-        let pipeline = build_pipeline(device, target_format, &[&uniform_layout, &sky_layout]);
+        let lut_textures = LutTextures::new(device, queue, lut);
+        let lut_layout = lut_bind_group_layout(device);
+        let lut_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lut bind group"),
+            layout: &lut_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&lut_textures.u_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&lut_textures.phi_max_view),
+                },
+            ],
+        });
+
+        let pipeline = build_pipeline(
+            device,
+            target_format,
+            &[&uniform_layout, &sky_layout, &lut_layout],
+        );
 
         Self {
             pipeline,
             uniform_buffer,
             uniform_bind_group,
             sky_bind_group,
+            lut_bind_group,
             _sky: sky_texture,
+            _lut: lut_textures,
         }
     }
 
@@ -86,6 +114,7 @@ impl BlackHolePass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         pass.set_bind_group(1, &self.sky_bind_group, &[]);
+        pass.set_bind_group(2, &self.lut_bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 }
@@ -132,6 +161,31 @@ fn sky_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+fn lut_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let unfilterable = wgpu::BindingType::Texture {
+        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+        view_dimension: wgpu::TextureViewDimension::D2,
+        multisampled: false,
+    };
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("lut layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: unfilterable,
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: unfilterable,
                 count: None,
             },
         ],

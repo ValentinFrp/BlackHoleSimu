@@ -9,10 +9,13 @@ du ray casting par pixel à travers l'espace-temps courbé.
 Une seule base de code, deux cibles : **natif** (`cargo run`, pour itérer vite)
 et **navigateur** via **WebAssembly** (`wasm-pack`).
 
-> **État : Phase 2 (trou noir naïf).** Caméra orbitale, sphère noire (horizon),
-> disque d'accrétion plat coloré et fond étoilé HDRI. Les rayons sont encore
-> **droits** : pas de lentille gravitationnelle (elle arrive en Phase 3 avec
-> l'intégration des géodésiques).
+> **État : Phase 4 (LUT de déflexion).** La géodésique n'est plus intégrée par
+> pixel : une table de déflexion précalculée sur CPU (équation de Binet, indexée
+> par paramètre d'impact) est uploadée en texture, et le shader l'interroge —
+> approche **Bruneton 2020**. Même rendu que la Phase 3 (lentille, anneau de
+> photons, images multiples du disque) pour un coût bien moindre. Détails et
+> formules : [`docs/deflection-lut.md`](docs/deflection-lut.md). Reste à venir :
+> effets relativistes fins (Doppler, redshift, corps noir) et polish.
 
 ## Effets visés (feuille de route physique)
 
@@ -64,19 +67,29 @@ cd web && python3 -m http.server 8080
 | Orbiter autour du trou noir | clic gauche + glisser |
 | Zoom (rapprocher / éloigner) | molette |
 
-## Rendu (Phase 2)
+## Rendu (Phase 4)
 
-Un triangle plein écran déclenche le *fragment shader* `blackhole.wgsl`, qui
-lance pour chaque pixel un rayon depuis la caméra. Trois issues :
+Un triangle plein écran déclenche le *fragment shader* `blackhole.wgsl`. Pour
+chaque pixel, `trace_ray` réduit le problème au **plan orbital** (centre +
+caméra + rayon), calcule le **paramètre d'impact** `b = |x × v|`, puis interroge
+une **table de déflexion précalculée** au lieu d'intégrer la géodésique.
 
-1. le rayon coupe l'horizon (sphère de rayon `r_s`) → **noir** ;
-2. il coupe le plan équatorial dans l'anneau `[r_in, r_out]` → **disque** coloré
-   (dégradé radial provisoire ; le vrai corps noir relativiste vient en Phase 5) ;
-3. sinon il part à l'infini → on échantillonne le **HDRI** (projection
-   équirectangulaire) dans la direction du rayon.
+La table est construite une fois au lancement (`src/physics/`) en intégrant
+l'**équation de Binet** `u'' = −u + (3/2) r_s u²` (lisse, sans singularité au
+périastre), adimensionnée donc indépendante de `r_s`. Elle est uploadée en deux
+textures `R32Float` et lue par interpolation bilinéaire manuelle (compatible
+WebGL2). Le shader en déduit, le long du rayon courbé :
 
-À ce stade les rayons sont rectilignes ; la courbure de l'espace-temps (lentille,
-anneau de photons, beaming, redshift) est ajoutée aux phases suivantes.
+1. `b < b_crit = 3√3/2·r_s` et rayon rentrant → **noir** (horizon) ;
+2. croisement(s) du plan équatorial dans l'anneau `[r_in, r_out]` → **disque**
+   (dégradé radial provisoire ; corps noir relativiste en Phase 5). Les
+   croisements multiples donnent recto/verso et anneaux d'ordre supérieur ;
+3. échappement → échantillonnage du fond stellaire dans la **direction finale
+   lensée**.
+
+Toute la dérivation (équation, adimensionnement, layout de la table, remappage
+de l'axe `b`, algorithme du shader) est dans
+[`docs/deflection-lut.md`](docs/deflection-lut.md).
 
 ## Architecture
 
@@ -87,22 +100,28 @@ src/
 ├── app.rs                  boucle winit, dispatch des entrées, cycle de vie
 ├── camera.rs               OrbitCamera (coords sphériques) + CameraController
 ├── scene.rs                paramètres physiques (trou noir, disque)
+├── physics/
+│   ├── mod.rs             ré-exports
+│   ├── geodesic.rs        intégration de l'équation de Binet (+ tests)
+│   └── lut.rs             construction de la table de déflexion (+ tests)
 └── renderer/
-    ├── mod.rs              façade Renderer (orchestration d'une frame)
-    ├── context.rs          GpuContext : device/queue/surface, resize, frame
-    ├── uniforms.rs         bloc uniforme (std140) caméra + scène
-    ├── hdri.rs             chargement HDRI (fs natif / fetch WASM) + décodage
-    ├── texture.rs          texture + sampler du fond HDRI
-    └── blackhole_pass.rs   pipeline + bind groups + enregistrement de la passe
+    ├── mod.rs             façade Renderer (orchestration d'une frame)
+    ├── context.rs         GpuContext : device/queue/surface, resize, frame
+    ├── uniforms.rs        bloc uniforme (std140) caméra + scène
+    ├── sky.rs             chargement du fond (fs natif / fetch WASM) + décodage
+    ├── texture.rs         texture + sampler du fond stellaire
+    ├── lut_texture.rs     upload de la table de déflexion en textures R32Float
+    └── blackhole_pass.rs  pipeline + bind groups + enregistrement de la passe
 shaders/
-├── common.wgsl             uniforms + helpers math (rayons, intersections, sky)
+├── common.wgsl             uniforms + lecture de table + trace_ray + helpers
 └── blackhole.wgsl          entry points VS/FS (concaténé après common.wgsl)
+docs/deflection-lut.md      dérivation physique + layout de la table
 web/                        index.html + style.css + main.js (bootstrap WASM)
-assets/milkyway.hdr         fond Voie lactée (non versionné, voir ci-dessous)
+assets/milkyway.png         fond Voie lactée (non versionné, voir ci-dessous)
 ```
 
-Phases à venir : `physics/` (métrique Schwarzschild, RK4, disque Novikov-Thorne),
-`renderer/precompute.rs` (table de déflexion à la Bruneton), LUT corps noir.
+Phases à venir : disque Novikov-Thorne (profil T(r)), Doppler/redshift, LUT
+corps noir, polish.
 
 ## Assets
 

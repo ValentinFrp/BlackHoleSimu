@@ -17,6 +17,14 @@ const BB_T_MIN: f32 = 1000.0;
 const BB_T_MAX: f32 = 40000.0;
 
 const NT_PEAK: f32 = 0.4877986;
+const TURB_FREQUENCY: f32 = 0.7;
+const TURB_WARP: f32 = 0.6;
+
+const DISK_MARCH_STEPS: i32 = 10;
+const DISK_ABSORPTION: f32 = 4.0;
+const FLARE_STRENGTH: f32 = 0.6;
+const VERT_SIGMAS: f32 = 3.0;
+const MAX_VERT_WINDOW: f32 = 0.45;
 
 struct Uniforms {
     cam_position: vec3<f32>,
@@ -31,6 +39,9 @@ struct Uniforms {
     disk_temperature: f32,
     disk_intensity: f32,
     disk_spin: f32,
+    disk_rotation_speed: f32,
+    disk_turbulence: f32,
+    disk_thickness: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -40,10 +51,9 @@ struct Uniforms {
 @group(2) @binding(1) var lut_phi_max: texture_2d<f32>;
 @group(2) @binding(2) var blackbody_lut: texture_2d<f32>;
 
-struct TraceResult {
-    kind: u32,
-    color: vec3<f32>,
-    direction: vec3<f32>,
+struct DiskSample {
+    emission: vec3<f32>,
+    alpha: f32,
 };
 
 fn ray_direction(uv: vec2<f32>) -> vec3<f32> {
@@ -99,11 +109,7 @@ fn camera_phi(fi: f32, phi_max: f32, u_camera: f32, captured: bool) -> f32 {
     return 0.5 * (lo + hi);
 }
 
-fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> TraceResult {
-    var result: TraceResult;
-    result.kind = 0u;
-    result.direction = dir;
-
+fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
     let rs = u.schwarzschild_radius;
     let r_camera = length(origin);
     let radial = origin / r_camera;
@@ -113,10 +119,9 @@ fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> TraceResult {
 
     if sin_psi < RADIAL_EPSILON {
         if cos_psi < 0.0 {
-            result.kind = 2u;
-            result.color = vec3<f32>(0.0);
+            return vec3<f32>(0.0);
         }
-        return result;
+        return sample_sky(dir);
     }
 
     let tangent = tangent_vec / sin_psi;
@@ -124,7 +129,7 @@ fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> TraceResult {
     let b = impact / rs;
 
     if b >= B_MAX {
-        return result;
+        return sample_sky(dir);
     }
 
     let u_camera = rs / r_camera;
@@ -137,6 +142,14 @@ fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> TraceResult {
     let phi_camera = camera_phi(fi, phi_max, u_camera, captured);
     let theta_total = select(phi_camera, phi_max - phi_camera, inward);
 
+    var background = vec3<f32>(0.0);
+    if !(captured && inward) {
+        background = sample_sky(normalize(cos(theta_total) * radial + sin(theta_total) * tangent));
+    }
+
+    var accum = vec3<f32>(0.0);
+    var transmittance = 1.0;
+
     let plane_a = radial.y;
     let plane_b = tangent.y;
     if abs(plane_a) > PLANE_EPSILON || abs(plane_b) > PLANE_EPSILON {
@@ -146,43 +159,27 @@ fn trace_ray(origin: vec3<f32>, dir: vec3<f32>) -> TraceResult {
             theta = theta + PI;
         }
         for (var k = 0; k < MAX_DISK_CROSSINGS; k = k + 1) {
-            if theta > theta_total {
+            if theta > theta_total || transmittance < 0.01 {
                 break;
             }
-            let phi = phi_camera + travel_sign * theta;
-            if phi >= 0.0 && phi <= phi_max {
-                let u_hit = fetch_u(fi, phi, phi_max);
-                if u_hit > RADIAL_EPSILON {
-                    let r_hit = rs / u_hit;
-                    if r_hit >= u.disk_inner && r_hit <= u.disk_outer {
-                        let branch_sign = select(-1.0, 1.0, captured || phi < phi_max * 0.5);
-                        result.kind = 1u;
-                        result.color = disk_emission(
-                            r_hit,
-                            theta,
-                            u_hit,
-                            b,
-                            branch_sign,
-                            travel_sign,
-                            radial,
-                            tangent,
-                        );
-                        return result;
-                    }
-                }
-            }
+            let sample = march_crossing(
+                theta,
+                phi_camera,
+                phi_max,
+                fi,
+                b,
+                captured,
+                travel_sign,
+                radial,
+                tangent,
+            );
+            accum += transmittance * sample.emission;
+            transmittance = transmittance * (1.0 - sample.alpha);
             theta = theta + PI;
         }
     }
 
-    if captured && inward {
-        result.kind = 2u;
-        result.color = vec3<f32>(0.0);
-        return result;
-    }
-
-    result.direction = normalize(cos(theta_total) * radial + sin(theta_total) * tangent);
-    return result;
+    return accum + transmittance * background;
 }
 
 fn sample_sky(dir: vec3<f32>) -> vec3<f32> {
@@ -242,19 +239,113 @@ fn doppler_g(
     return g_gravity * g_doppler;
 }
 
-fn disk_emission(
-    radius: f32,
-    theta: f32,
-    u_hit: f32,
+fn hash21(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+fn value_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let weight = f * f * (3.0 - 2.0 * f);
+    let a = hash21(i);
+    let b = hash21(i + vec2<f32>(1.0, 0.0));
+    let c = hash21(i + vec2<f32>(0.0, 1.0));
+    let d = hash21(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
+}
+
+fn fbm(p: vec2<f32>) -> f32 {
+    var value = 0.0;
+    var amplitude = 0.5;
+    var frequency = 1.0;
+    for (var i = 0; i < 5; i = i + 1) {
+        value = value + amplitude * value_noise(p * frequency);
+        frequency = frequency * 2.0;
+        amplitude = amplitude * 0.5;
+    }
+    return value;
+}
+
+fn fbm_warped(p: vec2<f32>) -> f32 {
+    let warp = vec2<f32>(fbm(p), fbm(p + vec2<f32>(5.2, 1.3)));
+    return fbm(p + TURB_WARP * warp);
+}
+
+fn disk_density(radius: f32, position: vec3<f32>) -> f32 {
+    let omega = sqrt(u.schwarzschild_radius / (2.0 * radius * radius * radius));
+    let delta = u.disk_spin * omega * u.time * u.disk_rotation_speed;
+    let plane = vec2<f32>(position.x, position.z);
+    let c = cos(delta);
+    let s = sin(delta);
+    let rotated = vec2<f32>(plane.x * c - plane.y * s, plane.x * s + plane.y * c);
+    let n = fbm_warped(rotated * TURB_FREQUENCY);
+    return mix(1.0 - u.disk_turbulence, 1.0, n);
+}
+
+fn march_crossing(
+    theta_center: f32,
+    phi_camera: f32,
+    phi_max: f32,
+    fi: f32,
     b: f32,
-    branch_sign: f32,
+    captured: bool,
     travel_sign: f32,
     radial: vec3<f32>,
     tangent: vec3<f32>,
-) -> vec3<f32> {
-    let g = doppler_g(radius, theta, u_hit, b, branch_sign, travel_sign, radial, tangent);
-    let temperature = disk_temperature(radius);
-    let ratio = temperature / u.disk_temperature;
-    let intensity = pow(g, 4.0) * ratio * ratio * ratio * ratio * u.disk_intensity;
-    return blackbody_color(g * temperature) * intensity;
+) -> DiskSample {
+    var sample: DiskSample;
+    sample.emission = vec3<f32>(0.0);
+    sample.alpha = 0.0;
+
+    let rs = u.schwarzschild_radius;
+    let phi_center = phi_camera + travel_sign * theta_center;
+    if phi_center < 0.0 || phi_center > phi_max {
+        return sample;
+    }
+    let u_center = fetch_u(fi, phi_center, phi_max);
+    if u_center <= RADIAL_EPSILON {
+        return sample;
+    }
+    let radius = rs / u_center;
+    if radius < u.disk_inner || radius > u.disk_outer {
+        return sample;
+    }
+
+    let branch_sign = select(-1.0, 1.0, captured || phi_center < phi_max * 0.5);
+    let g = doppler_g(radius, theta_center, u_center, b, branch_sign, travel_sign, radial, tangent);
+    let base_temperature = disk_temperature(radius);
+    let height = max(u.disk_thickness * radius, 1.0e-3);
+
+    let ct = cos(theta_center);
+    let st = sin(theta_center);
+    let vertical_rate = max(abs(-st * radial.y + ct * tangent.y), 0.08);
+    let half_window = min(VERT_SIGMAS * height / (radius * vertical_rate), MAX_VERT_WINDOW);
+    let segment = (2.0 * half_window / f32(DISK_MARCH_STEPS)) * radius;
+    let intensity_base = pow(g, 4.0) * u.disk_intensity;
+
+    var local_transmittance = 1.0;
+    for (var m = 0; m < DISK_MARCH_STEPS; m = m + 1) {
+        let frac = ((f32(m) + 0.5) / f32(DISK_MARCH_STEPS)) * 2.0 - 1.0;
+        let theta_s = theta_center + frac * half_window;
+        let position = radius * (cos(theta_s) * radial + sin(theta_s) * tangent);
+        let vertical = position.y / height;
+        let falloff = exp(-0.5 * vertical * vertical);
+        let density = falloff * disk_density(radius, position);
+        if density > 1.0e-4 {
+            let temperature = base_temperature * (1.0 + FLARE_STRENGTH * (density - 0.5) * 2.0);
+            let ratio = temperature / u.disk_temperature;
+            let glow = blackbody_color(g * temperature)
+                * intensity_base
+                * ratio * ratio * ratio * ratio;
+            let optical_depth = density * DISK_ABSORPTION * segment;
+            let coverage = 1.0 - exp(-optical_depth);
+            sample.emission += local_transmittance * glow * coverage;
+            local_transmittance = local_transmittance * (1.0 - coverage);
+        }
+    }
+
+    sample.alpha = 1.0 - local_transmittance;
+    return sample;
 }

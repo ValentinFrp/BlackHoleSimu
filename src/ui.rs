@@ -22,6 +22,18 @@ pub fn panel(ctx: &egui::Context, scene: &mut Scene, post: &mut PostSettings, su
                         egui::Slider::new(&mut scene.disk.outer_radius, 6.0..=20.0)
                             .text("Rayon externe"),
                     );
+                    ui.add(
+                        egui::Slider::new(&mut scene.disk.rotation_speed, 0.0..=12.0)
+                            .text("Vitesse de rotation"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut scene.disk.turbulence, 0.0..=1.0)
+                            .text("Turbulence"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut scene.disk.thickness, 0.0..=0.4)
+                            .text("Épaisseur"),
+                    );
                     if ui.button("Inverser la rotation").clicked() {
                         scene.disk.spin = -scene.disk.spin;
                     }

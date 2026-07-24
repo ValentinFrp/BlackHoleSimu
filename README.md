@@ -15,6 +15,8 @@ et **navigateur** via **WebAssembly** (`wasm-pack`).
 > [détails](docs/disk-physics.md)) ; et post-traitement HDR : **super-sampling
 > (SSAA 2×)** anti-aliasing, **bloom**, tonemap **ACES**, et un panneau de
 > **sliders egui** (température, intensité, rayons, exposition, bloom, SSAA…).
+> Le disque est **animé** : rotation différentielle Keplerienne + turbulence
+> procédurale (le gaz tourbillonne et s'enroule en temps réel).
 
 ## Effets visés (feuille de route physique)
 

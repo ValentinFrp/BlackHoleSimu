@@ -16,17 +16,6 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let origin = u.cam_position;
     let dir = ray_direction(in.uv);
-
-    let traced = trace_ray(origin, dir);
-
-    var color: vec3<f32>;
-    if traced.kind == 1u {
-        color = traced.color;
-    } else if traced.kind == 2u {
-        color = vec3<f32>(0.0);
-    } else {
-        color = sample_sky(traced.direction);
-    }
-
+    let color = trace_ray(origin, dir);
     return vec4<f32>(color, 1.0);
 }

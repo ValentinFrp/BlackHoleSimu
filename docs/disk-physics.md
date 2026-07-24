@@ -129,6 +129,48 @@ Le shader lit la LUT à `g·T(r)` (interpolation linéaire manuelle, `textureLoa
 Tests (`cargo test`) : 2000 K rougeâtre (`R > B`), 20000 K bleuté (`B > R`),
 6500 K ≈ neutre.
 
+## Disque volumétrique (ultra-réaliste)
+
+Le disque n'est plus un plan infiniment fin : c'est un **volume** intégré le
+long de la géodésique courbe. `trace_ray` ne renvoie plus une couleur opaque
+mais composite un disque émissif/absorbant **devant le fond** (ciel lensé ou
+horizon noir) :
+
+- **Fond** : direction d'échappement → `sample_sky`, ou noir si le rayon est
+  capturé. C'est ce qu'il y a derrière le gaz.
+- **Marche volumétrique** : à chaque croisement du plan équatorial
+  (`march_crossing`), on échantillonne `DISK_MARCH_STEPS` points en θ autour du
+  croisement, sur une fenêtre verticale `±VERT_SIGMAS·H/(r·|dy/dθ|)` (donc plus
+  large en incidence rasante → limbe brillant). Le rayon r varie peu sur cette
+  fine tranche verticale, donc on fige `r`, le facteur `g` et la couleur de base
+  au centre, et on ne fait varier que la hauteur `y` et la turbulence.
+- **Profil vertical** : densité gaussienne `exp(−½(y/H)²)`, `H = disk_thickness·r`
+  (disque évasé). Accumulation émission + absorption front-vers-arrière
+  (`coverage = 1 − exp(−densité·DISK_ABSORPTION·ds)`, transmittance cumulée) →
+  le gaz dense occulte le gaz lointain, et les croisements multiples se
+  composent correctement.
+- **Points chauds / flares** : la densité de turbulence module aussi la
+  température (`T = T(r)·(1 + FLARE_STRENGTH·(densité−0.5)·2)`) → les nuées
+  denses sont plus chaudes (plus bleues) ET plus brillantes (`∝ T⁴`), avec des
+  éruptions qui apparaissent/s'estompent au fil de l'advection.
+
+## Rotation et turbulence
+
+Le motif d'émission est mis en **rotation différentielle Keplerienne** et modulé
+par une **turbulence procédurale détaillée**, advectée dans le temps via `time`.
+
+- Vitesse angulaire d'une orbite circulaire : `Ω(r) = √(r_s / 2r³)` (le bord
+  interne tourne bien plus vite que l'externe → spirales de cisaillement).
+- Au point d'impact, on tourne la position équatoriale `(x, z)` d'un angle
+  `δ = disk_spin · Ω(r) · time · disk_rotation_speed` (donc chaque rayon tourne
+  de son propre angle → cisaillement différentiel, sans couture car on tourne un
+  point continu), puis on échantillonne un **FBM domain-warpé** (bruit de valeur,
+  5 octaves, plus un warp `fbm(p + amplitude·fbm(p))` → nuées filamenteuses) en
+  ce point. La densité de gaz vaut `densité = mix(1 − turbulence, 1, fbm_warpé)`
+  (turbulence = 0 → disque lisse ; = 1 → nuées avec creux).
+- Le sens de rotation suit `disk_spin` → cohérent avec le côté Doppler brillant.
+- Sliders : `disk_rotation_speed`, `disk_turbulence`, `disk_thickness`.
+
 ## Constantes du shader (réglage)
 
 | Constante | Rôle |

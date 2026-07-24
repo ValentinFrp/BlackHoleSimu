@@ -22,9 +22,9 @@ pub struct Uniforms {
     disk_temperature: f32,
     disk_intensity: f32,
     disk_spin: f32,
-    _pad4: f32,
-    _pad5: f32,
-    _pad6: f32,
+    disk_rotation_speed: f32,
+    disk_turbulence: f32,
+    disk_thickness: f32,
 }
 
 impl Uniforms {
@@ -46,9 +46,9 @@ impl Uniforms {
             disk_temperature: scene.disk.peak_temperature,
             disk_intensity: scene.disk.intensity,
             disk_spin: scene.disk.spin,
-            _pad4: 0.0,
-            _pad5: 0.0,
-            _pad6: 0.0,
+            disk_rotation_speed: scene.disk.rotation_speed,
+            disk_turbulence: scene.disk.turbulence,
+            disk_thickness: scene.disk.thickness,
         }
     }
 }
